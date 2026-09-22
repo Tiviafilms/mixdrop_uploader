@@ -1,0 +1,6 @@
+requests
+cloakbrowser
+playwright
+firebase-admin
+python-dotenv
+pytest
