@@ -220,8 +220,18 @@ def check_filename_patterns(filename):
 
 def get_unprocessed_urls():
     # Fetch all items from the root of Firebase Realtime Database
-    ref = db.reference('/')
-    data = ref.get()
+    db_url = os.environ.get("FIREBASE_DATABASE_URL", "https://mixdrop-upload-default-rtdb.firebaseio.com")
+    if db_url.endswith('/'):
+        db_url = db_url[:-1]
+    
+    secret = os.environ.get("FIREBASE_DATABASE_SECRET")
+    url = f"{db_url}/.json"
+    if secret:
+        url += f"?auth={secret}"
+    
+    response = requests.get(url)
+    data = response.json()
+    
     movies_data = []
     
     if isinstance(data, list):
