@@ -86,36 +86,40 @@ async def extract_download_link(url, proxy_dict=None):
         browser = await launch_async(args=browser_args, headless=True)
         
     print("browser launched")
-    page = await browser.new_page()
-    await page.goto(url, wait_until="domcontentloaded")
-    print("page loaded")
-    
     try:
-        await page.get_by_text("click to verify", exact=False).click(timeout=30000)
-        print("clicked to verify")
-    except Exception as e:
-        print(f"Timeout or error clicking verify: {e}")
-        print("falling back to fetcher function....")
-        await browser.close()
-        await asyncio.sleep(0.25)
-        return fetcher(url, proxy_dict)
+        page = await browser.new_page()
+        await page.goto(url, wait_until="domcontentloaded")
+        print("page loaded")
+        
+        try:
+            await page.get_by_text("click to verify", exact=False).click(timeout=30000)
+            print("clicked to verify")
+        except Exception as e:
+            print(f"Timeout or error clicking verify: {e}")
+            print("falling back to fetcher function....")
+            return fetcher(url, proxy_dict)
 
-    if url.__contains__("fast-dl"):
-        print("searching vd")
-        download_url = await page.locator("#vd").get_attribute("href")
-    elif url.__contains__("vgmlinks"):
-        print("searching mixdrop")
-        button = page.locator("button:has-text('MIXDROP')")
-        download_url = await button.locator("xpath=..").get_attribute("href")
-    elif url.__contains__("nexdrive.dev"):
-        print("skipping this one....")
-        download_url = None
-    elif url.__contains__("nexdrive.pics")  or url.__contains__("nexdrive.help"):
-        print("calling fetcher function....")
-        download_url = fetcher(url, proxy_dict)
-    await browser.close()
-    await asyncio.sleep(0.25)
-    return download_url
+        if url.__contains__("fast-dl"):
+            print("searching vd")
+            download_url = await page.locator("#vd").get_attribute("href")
+        elif url.__contains__("vgmlinks"):
+            print("searching mixdrop")
+            button = page.locator("button:has-text('MIXDROP')")
+            download_url = await button.locator("xpath=..").get_attribute("href")
+        elif url.__contains__("nexdrive.dev"):
+            print("skipping this one....")
+            download_url = None
+        elif url.__contains__("nexdrive.pics")  or url.__contains__("nexdrive.help"):
+            print("calling fetcher function....")
+            download_url = fetcher(url, proxy_dict)
+            
+        return download_url
+    finally:
+        try:
+            await browser.close()
+        except Exception:
+            pass
+        await asyncio.sleep(0.25)
 
 
 def fetcher(url, proxy_dict=None):
@@ -310,6 +314,8 @@ def process_url(title, url, proxies, proxy_dict=None, retries=0):
             
             for sub_url in download_url:
                 process_url(title, sub_url, proxies, proxy_dict)
+            with open("completed_urls.txt", "a", encoding="utf-8") as f:
+                f.write(url + "\n")
             return
 
         msg = f"Download url found for {url}: {download_url}"
@@ -339,6 +345,8 @@ def process_url(title, url, proxies, proxy_dict=None, retries=0):
             print(msg)
             logging.info(msg)
             upload_to_streamtape(download_url)
+            with open("completed_urls.txt", "a", encoding="utf-8") as f:
+                f.write(url + "\n")
             return
             
         # Use the actual filename from mixdrop response instead of title + .mp4
