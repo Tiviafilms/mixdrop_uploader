@@ -3,8 +3,6 @@ import re
 from cloakbrowser import launch_async
 import asyncio
 import time
-import firebase_admin
-from firebase_admin import credentials, db
 
 import os
 import logging
@@ -36,11 +34,6 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
-
-cred = credentials.Certificate(os.environ.get("FIREBASE_KEY_PATH", "firebase-key.json"))
-firebase_admin.initialize_app(cred, {
-    'databaseURL': os.environ.get("FIREBASE_DATABASE_URL")
-})
 
 email = os.environ.get("MIXDROP_EMAIL")
 key = os.environ.get("MIXDROP_KEY")
@@ -218,10 +211,22 @@ def check_filename_patterns(filename):
             return parts[0].replace(".", " ") + "." + parts[1]
     return filename
 
-def get_unprocessed_urls():
-    # Fetch all items from the root of Firebase Realtime Database
-    ref = db.reference('/')
-    data = ref.get()
+def get_unprocessed_urls(completed_urls=None):
+    if completed_urls is None:
+        completed_urls = set()
+        # Fetch all items from the root of Firebase Realtime Database using REST API
+    db_url = os.environ.get("FIREBASE_DATABASE_URL", "https://mixdrop-upload-default-rtdb.firebaseio.com")
+    if db_url.endswith('/'):
+        db_url = db_url[:-1]
+    
+    # Use Database Secret for secure access if provided
+    secret = os.environ.get("FIREBASE_DATABASE_SECRET")
+    url = f"{db_url}/.json"
+    if secret:
+        url += f"?auth={secret}"
+    
+    response = requests.get(url)
+    data = response.json()
     movies_data = []
     
     if isinstance(data, list):
@@ -236,10 +241,14 @@ def get_unprocessed_urls():
             continue
         if movie.get("status") == "found":
             title = movie.get("title", "Unknown Title")
-            unprocessed_url = movie.get("download_urls", [])
-            if unprocessed_url:
-                movies_data.append((title, unprocessed_url))
-
+            unprocessed_urls = movie.get("download_urls", [])
+            
+            # Filter out already processed URLs
+            filtered_urls = [u for u in unprocessed_urls if u not in completed_urls]
+            
+            if filtered_urls:
+                movies_data.append((title, filtered_urls))
+                
     return movies_data
 
 def process_url(title, url, proxies, proxy_dict=None, retries=0):
@@ -312,7 +321,9 @@ def process_url(title, url, proxies, proxy_dict=None, retries=0):
         msg = f"Successfully uploaded and renamed: {filename} (Original URL: {url})"
         print(msg)
         logging.info(msg)
-        
+
+        with open("completed_urls.txt", "a", encoding="utf-8") as f:
+            f.write(url + "\n")
     except Exception as e:
         error_msg = str(e)
         if "ERR_TUNNEL_CONNECTION_FAILED" in error_msg and proxies and retries < 5:
@@ -363,7 +374,17 @@ def orchestrator():
     max_workers = int(os.environ.get("MAX_WORKERS", "5"))
     proxies = load_proxies()
     
-    movies = get_unprocessed_urls()
+    completed_urls = set()
+    if os.path.exists("completed_urls.txt"):
+        with open("completed_urls.txt", "r", encoding="utf-8") as f:
+            for line in f:
+                u = line.strip()
+                if u:
+                    completed_urls.add(u)
+                    
+    print(f"Loaded {len(completed_urls)} previously completed URLs.")
+    
+    movies = get_unprocessed_urls(completed_urls)
     tasks = []
     
     # We flatten the tasks to process them concurrently
