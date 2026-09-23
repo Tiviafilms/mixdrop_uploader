@@ -44,7 +44,35 @@ streamtape_api_key = os.environ.get("STREAMTAPE_API_KEY")
 
 # URL = "https://fast-dl.one/dl/6b1a11"
 
+import subprocess
+import sys
+
+async def wait_for_available_browser_slot():
+    limit = int(os.environ.get("CHROME_PROCESS_LIMIT", "15"))
+    while True:
+        try:
+            if sys.platform.startswith('win'):
+                # Check the number of running chrome/chromium processes on Windows
+                output = subprocess.check_output('tasklist /FO CSV', shell=True).decode('utf-8', errors='ignore')
+                count = output.lower().count("chrome.exe") + output.lower().count("chromium.exe")
+            else:
+                # Check on Linux/macOS
+                output = subprocess.check_output('ps -e -o comm=', shell=True).decode('utf-8', errors='ignore')
+                count = output.lower().count("chrome") + output.lower().count("chromium")
+                
+            if count < limit:
+                break
+        except Exception as e:
+            logging.error(f"Error checking process count: {e}")
+            break
+            
+        print(f"Browser limit ({limit}) reached (Currently {count} processes running). Waiting 5 seconds...")
+        await asyncio.sleep(5)
+
 async def extract_download_link(url, proxy_dict=None):
+    # Wait until there are fewer than the configured limit of chrome instances running
+    await wait_for_available_browser_slot()
+    
     browser_args = ['--no-sandbox', '--disable-setuid-sandbox']
     if proxy_dict:
         # format proxy for playwright
